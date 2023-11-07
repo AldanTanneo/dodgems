@@ -1,0 +1,24 @@
+[package]
+name = "dodgems"
+authors = ["César Sagaert <sagaert.cesar@gmail.com>"]
+description = "A simple and fast bump allocator library"
+documentation = "https://docs.rs/dodgems"
+version = "0.1.0"
+edition = "2021"
+readme = "README.md"
+license = "MIT"
+repository = "https://github.com/AldanTanneo/dodgems"
+homepage = "https://github.com/AldanTanneo/dodgems"
+categories = ["memory-management", "rust-patterns", "no-std"]
+keywords = [
+    "allocator",
+    "bump-allocator",
+    "memory-management",
+    "performance",
+    "no-std",
+]
+exclude = ["/.github/*", "/tests"]
+
+[features]
+alloc = []
+default = ["alloc"]
