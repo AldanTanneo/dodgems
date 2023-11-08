@@ -33,7 +33,7 @@
 //! # }
 //! ```
 //!
-//! Until the `allocator_api` is stable, this crate requires nightly.
+//! Until the `allocator_api` is stable, this crate requires the nightly edition.
 //!
 //! ## Features
 //! The (default) `alloc` feature controls wether the `alloc` standard crate is used.
@@ -50,17 +50,35 @@ use core::{cell::Cell, mem::size_of, ptr::NonNull};
 
 /// Returns the next multiple of `align` greater than `size`
 ///
-/// # SAFETY
+/// # Safety
 /// `size + align` must not overflow, and `align` must be a power of two.
+///
+/// As a consequence, [`dodgems`](crate) does not support alignment values above 2^30.
 unsafe fn next_multiple(size: usize, align: usize) -> usize {
     let am = align - 1;
-    (size + am) ^ am
+    (size + am) & !am
+}
+
+#[cfg(test)]
+#[test]
+fn next_multiple_power_of_two() {
+    for size in 0..512 {
+        for align in [1, 2, 4, 8, 16, 32, 64] {
+            let nm = unsafe { next_multiple(size, align) };
+            assert_eq!(nm % align, 0);
+            let q = nm / align;
+            assert!(q * align >= size);
+            if q > 0 {
+                assert!((q - 1) * align < size);
+            }
+        }
+    }
 }
 
 /// Fast bump allocator.
 ///
 /// Allocations are made by incrementing an offset, and are tied to the lifetime of a reference
-/// to the allocation until the `BumpCar` is dropped or reset.
+/// to the allocation until the [`BumpCar`] is dropped or reset.
 ///
 /// # Example
 /// ```rust
@@ -149,6 +167,36 @@ impl<A: Allocator> BumpCar<A> {
     pub fn reset(&mut self) {
         self.position.set(0);
     }
+
+    /// Create a new checkpoint.
+    ///
+    /// This function allocates the rest of the allocated space into another [`BumpCar`],
+    /// that can used to reset part of the allocated space instead of the whole allocation.
+    ///
+    /// # Example
+    /// ```rust
+    /// #![feature(allocator_api)]
+    /// # extern crate alloc;
+    /// use dodgems::BumpCar;
+    ///
+    /// let bumpcar = BumpCar::new(256).unwrap();
+    /// let alloc_half = Box::new_in([0u8; 128], &bumpcar);
+    ///
+    /// let mut checkpoint = bumpcar.checkpoint();
+    /// let alloc_rest = Box::new_in([0u8; 128], &checkpoint);
+    /// drop(alloc_rest);
+    /// assert_eq!(checkpoint.remaining_capacity(), 0);
+    ///
+    /// checkpoint.reset();
+    /// assert_eq!(checkpoint.remaining_capacity(), 128);
+    /// ```
+    pub fn checkpoint<'a>(&'a self) -> BumpCar<&'a BumpCar<A>> {
+        BumpCar::new_in(
+            self.remaining_capacity() - self.remaining_capacity() % size_of::<usize>(),
+            self,
+        )
+        .unwrap()
+    }
 }
 
 #[cfg(feature = "alloc")]
@@ -178,7 +226,7 @@ impl<A: Allocator> Drop for BumpCar<A> {
     }
 }
 
-unsafe impl<'a, A: Allocator> Allocator for &'a BumpCar<A> {
+unsafe impl<A: Allocator> Allocator for &BumpCar<A> {
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
         // SAFETY: layout.align() is guaranteed to be a power of two,
         // and self.position() <= pointer.len() <= isize::MAX, so the operation cannot overflow.
